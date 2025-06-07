@@ -4,7 +4,40 @@ export default function Home() {
     const [data, setData] = useState(null);
     const [connectionStatus, setConnectionStatus] = useState('Connecting');
     const [message, setMessage] = useState('');
+    const [filteredData, setFilteredData] = useState(null);
     const wsRef = useRef(null);
+
+    // Toggle states for different filters
+    const [toggles, setToggles] = useState({
+        category1: false,
+        category2: false,
+        category3: false,
+        status_active: false,
+        status_pending: false,
+        priority_high: false,
+        priority_medium: false,
+        priority_low: false
+    });
+
+    // Available toggle options for the UI
+    const toggleOptions = [
+        { key: 'category1', label: 'Category 1', group: 'Categories' },
+        { key: 'category2', label: 'Category 2', group: 'Categories' },
+        { key: 'category3', label: 'Category 3', group: 'Categories' },
+        { key: 'status_active', label: 'Active', group: 'Status' },
+        { key: 'status_pending', label: 'Pending', group: 'Status' },
+        { key: 'priority_high', label: 'High Priority', group: 'Priority' },
+        { key: 'priority_medium', label: 'Medium Priority', group: 'Priority' },
+        { key: 'priority_low', label: 'Low Priority', group: 'Priority' }
+    ];
+
+    // Group toggles by their group property
+    const groupedToggles = toggleOptions.reduce((groups, toggle) => {
+        const group = toggle.group;
+        if (!groups[group]) groups[group] = [];
+        groups[group].push(toggle);
+        return groups;
+    }, {});
 
     useEffect(() => {
         let reconnectTimer;
@@ -61,6 +94,9 @@ export default function Home() {
                     if (receivedData.type === "new_data") {
                         console.log("New data received:", receivedData);
                         setData(receivedData);
+                    } else if (receivedData.type === "filtered_data") {
+                        console.log("Filtered data received:", receivedData);
+                        setFilteredData(receivedData);
                     } else {
                         setData(receivedData);
                     }
@@ -110,6 +146,57 @@ export default function Home() {
         };
     }, []);
 
+    // Handle toggle changes
+    const handleToggleChange = (toggleKey) => {
+        const newToggles = {
+            ...toggles,
+            [toggleKey]: !toggles[toggleKey]
+        };
+        setToggles(newToggles);
+
+        // Send updated filters to server
+        sendFilterRequest(newToggles);
+    };
+
+    // Send filter request to server
+    const sendFilterRequest = (currentToggles = toggles) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            // Get array of active toggles
+            const activeFilters = Object.entries(currentToggles)
+                .filter(([key, value]) => value)
+                .map(([key]) => key);
+
+            const filterData = {
+                type: 'filter_request',
+                filters: activeFilters,
+                timestamp: Date.now()
+            };
+
+            wsRef.current.send(JSON.stringify(filterData));
+            console.log('Sent filter request:', filterData);
+        } else {
+            console.log('WebSocket is not connected');
+        }
+    };
+
+    // Clear all filters
+    const clearAllFilters = () => {
+        const clearedToggles = Object.keys(toggles).reduce((acc, key) => {
+            acc[key] = false;
+            return acc;
+        }, {});
+        setToggles(clearedToggles);
+        sendFilterRequest(clearedToggles);
+    };
+
+    // Load initial data when connected
+    useEffect(() => {
+        if (connectionStatus === 'Connected') {
+            // Send initial filter request (empty filters = all data)
+            sendFilterRequest();
+        }
+    }, [connectionStatus]);
+
     const sendMessage = () => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             const messageData = {
@@ -138,8 +225,8 @@ export default function Home() {
 
     return (
         <div className="min-h-screen bg-gray-100 p-8">
-            <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
-                <h1 className="text-2xl font-bold mb-4">WebSocket Test</h1>
+            <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+                <h1 className="text-2xl font-bold mb-4">WebSocket Test with Filtering</h1>
 
                 {/* Connection Status */}
                 <div className="mb-4 flex items-center gap-2">
@@ -158,6 +245,59 @@ export default function Home() {
                     }`}>
                         {connectionStatus}
                     </span>
+                </div>
+
+                {/* Filter Toggles */}
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold">Data Filters</h3>
+                        <button
+                            onClick={clearAllFilters}
+                            disabled={connectionStatus !== 'Connected'}
+                            className="px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Clear All
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {Object.entries(groupedToggles).map(([groupName, groupToggles]) => (
+                            <div key={groupName} className="bg-white p-3 rounded border">
+                                <h4 className="font-medium text-gray-700 mb-2">{groupName}</h4>
+                                <div className="space-y-2">
+                                    {groupToggles.map((toggle) => (
+                                        <label key={toggle.key} className="flex items-center space-x-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={toggles[toggle.key]}
+                                                onChange={() => handleToggleChange(toggle.key)}
+                                                disabled={connectionStatus !== 'Connected'}
+                                                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 disabled:cursor-not-allowed"
+                                            />
+                                            <span className={`text-sm ${connectionStatus !== 'Connected' ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                {toggle.label}
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Active Filters Summary */}
+                    <div className="mt-3 pt-3 border-t">
+                        <span className="text-sm text-gray-600">Active filters: </span>
+                        {Object.entries(toggles).filter(([key, value]) => value).length === 0 ? (
+                            <span className="text-sm text-gray-400">None (showing all data)</span>
+                        ) : (
+                            <span className="text-sm text-blue-600">
+                                {Object.entries(toggles)
+                                    .filter(([key, value]) => value)
+                                    .map(([key]) => toggleOptions.find(opt => opt.key === key)?.label)
+                                    .join(', ')}
+                            </span>
+                        )}
+                    </div>
                 </div>
 
                 {/* Message Input */}
@@ -192,12 +332,21 @@ export default function Home() {
                     </button>
                 </div>
 
-                {/* Data Display */}
-                <div className="bg-gray-50 p-4 rounded-md">
-                    <h3 className="font-semibold mb-2">Received Data:</h3>
-                    <pre className="text-sm bg-white p-3 rounded border overflow-auto max-h-64">
-                        {data ? JSON.stringify(data, null, 2) : 'No data received yet'}
-                    </pre>
+                {/* Filtered Data Display */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                    <div className="bg-gray-50 p-4 rounded-md">
+                        <h3 className="font-semibold mb-2 text-green-700">Filtered Results:</h3>
+                        <pre className="text-sm bg-white p-3 rounded border overflow-auto max-h-64">
+                            {filteredData ? JSON.stringify(filteredData, null, 2) : 'No filtered data yet - adjust filters above'}
+                        </pre>
+                    </div>
+
+                    <div className="bg-gray-50 p-4 rounded-md">
+                        <h3 className="font-semibold mb-2 text-blue-700">Other Messages:</h3>
+                        <pre className="text-sm bg-white p-3 rounded border overflow-auto max-h-64">
+                            {data ? JSON.stringify(data, null, 2) : 'No other messages received yet'}
+                        </pre>
+                    </div>
                 </div>
             </div>
         </div>
